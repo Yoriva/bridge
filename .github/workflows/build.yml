@@ -1,0 +1,67 @@
+name: Build and Deploy
+on: [ push, pull_request ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: continuous
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android (arm32 & arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Build unsigned bridge APK
+        run: |
+          ./gradlew assembleGitContinuous
+          mv app/build/outputs/apk/git/continuous/app-git-continuous-unsigned.apk YorivaBridge-Android.apk
+        working-directory: android
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android
+          path: android/YorivaBridge-Android.apk
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: [ android ]
+    steps:
+      - name: Fetch artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Android
+
+      - name: Remove old release
+        run: |
+          TAG_NAME="continuous"
+          if gh release list --repo ${{ github.repository }} | grep -q -e "$TAG_NAME"; then
+            gh release delete "$TAG_NAME" --yes --cleanup-tag --repo ${{ github.repository }}
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload new release
+        run: |
+          gh release create "continuous" --title "Yoriva Bridge" \
+            --prerelease --generate-notes \
+            YorivaBridge-Android.apk --repo ${{ github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
